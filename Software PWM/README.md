@@ -1,28 +1,85 @@
 # Software PWM
-Most microprocessors will have a Timer module, but depending on the device, some may not come with pre-built PWM modules. Instead, you may have to utilize software techniques to synthesize PWM on your own.
+Uses PWM and a button to change the brightness of an LED
 
-## Task
-You need to generate a 1kHz PWM signal with a duty cycle between 0% and 100%. Upon the processor starting up, you should PWM one of the on-board LEDs at a 50% duty cycle. Upon pressing one of the on-board buttons, the duty cycle of the LED should increase by 10%. Once you have reached 100%, your duty cycle should go back to 0% on the next button press. You also need to implement the other LED to light up when the Duty Cycle button is depressed and turns back off when it is let go. This is to help you figure out if the button has triggered multiple interrupts.
+## Code Architecture
+### Dependencies 
+The `softwarePWM.c` code depends on two separate files. The first file is the generic MSP430  header (`msp430.h`), and a config file (`config.h`) which assigns the correct pins for each board. For more information about these, visit their respective `README.h` files.
 
-### Hints
-You really, really, really, really need to hook up the output of your LED pin to an oscilloscope to make sure that the duty cycle is accurate. Also, since you are going to be doing a lot of initialization, it would be helpful for all persons involved if you created your main function like:
-'''c
-int main(void)
-{
-	WDTCTL = WDTPW | WDTHOLD;	// stop watchdog timer
-	LEDSetup(); // Initialize our LEDS
-	ButtonSetup();  // Initialize our button
-	TimerA0Setup(); // Initialize Timer0
-	TimerA1Setup(); // Initialize Timer1
-	__bis_SR_register(LPM0_bits + GIE);       // Enter LPM0 w/ interrupt
+```c
+#include <msp430.h>
+#include <config.h>
+```
+This is the section of the code which is used to include the header files.
+### Functions 
+
+#### Button Initialization
+
+In order to make the code easier to digest, a void function was used to initialize the button.
+```c
+void buttonInitialize(void)
+```
+Inside of this function the button pin is declared an input, and the resistor is enabled and assigned to the pull up position. Additionally, the interrupt on the button pin is enabled, cleared, and set to falling edge. This function is then called inside of the main function and reduces the amount of possibly confusing code. The lines of code used to initialize the code are found below. 
+```c 
+B1_DIR |= ~BUTTON1;
+B1_REN |=  BUTTON1;
+B1_OUT |=  BUTTON1;
+B1_IE  |=  BUTTON1;      
+B1_IES |= ~BUTTON1;   
+B1_IFG &= ~BUTTON1;   
+```
+
+#### LED Initialization
+Another void function was used to set up the LEDs.
+```c
+void ledInitialize(void)
+```
+Inside of this function the LEDs are set to be an output. Additionally, LED1 is multiplexed with the Timer_A pin, which gives the timer control over the LED for PWM control.
+```c 
+L1_DIR = LED1; 
+L2_DIR = LED2;
+L1_OUT = ~LED1;
+P1SEL0 |= LED1;
+```
+
+#### Main
+
+In the main file there is no use of interrupts, so the Watch Dog timer needed to be disabled using the line 
+```c
+WDTCTL = WDTPW+WDTHOLD;
+```
+With the FR6989, FR2311, and FR5994 needing high impedance mode to be disabled, the line 
+```c
+HIGHZ;
+```
+is used to disable it. This is a macro defined in the config.h header file, and it will disable the high impedance mode for the specified board. For the other boards, it just opeartaes as a no-op. 
+
+All of the void functions listed above are called, and then a timer is initalized. 
+```c
+TA0CCR0 = 1000-1;        
+TA0CCTL1 = OUTMOD_7;     
+TA0CCR1 = PWM;           
+TA0CTL = TASSEL_2 + MC_1;
+```
+The timer is set up to run using SMCLK as the source, and operate in Up-Mode. The CCR0 value is chosen to be 1000, which gives the light a frequenyc of 1 kHz. A second capture-compare register is used to determine the pule width.
+
+After the clock is initialized, the program is dropped into low power mode while waiting for the interrupt.
+```c
+_BIS_SR(LPM0_bits + GIE);
+```
+This disables the CPU until an interrupt happens. The `GIE` bit at the end enables global interrupts. While there are other Low-Power modes that use less power, this one will cause the least amount of changes that need to be made in the code, preventing the timer source from changing.
+
+#### Button ISR
+When the button interrupt occurs, the ISR is entered. Inside of the ISR, the button that is not being controlled through PWM is toggled to see if debouncing occurs. To prevent debouncing, a `__delay_cycles()` command is used to halt the program for a little. Once the LED is toggled, the the value of the `CCR1` register is increased, changing the brightness of the LED by 10%. There is an `if` statement to check if the light has reached its maximum brightness, and when it has the `CCR1` value is set to zero. The button ISR is found below.
+```c
+#pragma vector=PORT1_VECTOR    
+__interrupt void Port_1(void) {
+    __delay_cycles(500);       
+    L2_OUT ^= LED2;            
+    TA0CCR1 += 100;            
+    if(TA0CCR1 == 1100) {      
+        TA0CCR1 = 0;        
+    }
+    B1_IFG &= ~BUTTON1;        
 }
-'''
-This way, each of the steps in initialization can be isolated for easier understanding and debugging.
+```
 
-
-## Extra Work
-### Linear Brightness
-Much like every other things with humans, not everything we interact with we perceive as linear. For senses such as sight or hearing, certain features such as volume or brightness have a logarithmic relationship with our senses. Instead of just incrementing by 10%, try making the brightness appear to change linearly. 
-
-### Power Comparison
-Since you are effectively turning the LED off for some period of time, it should follow that the amount of power you are using over time should be less. Using Energy Trace, compare the power consumption of the different duty cycles. What happens if you use the pre-divider in the timer module for the PWM (does it consume less power)?
