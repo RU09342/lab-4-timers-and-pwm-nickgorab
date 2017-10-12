@@ -88,3 +88,7 @@ As you may have noticed, the MSP430F2311 has its own special folder for itself. 
 
 ## Hardware
 In order to power the LED, a circuit was used that is similar to the one used for `offboardBlink.c`, using a BJT as a current amplifier to power the LED.
+
+## Extra Work
+### Ultra Low Power
+Using PWM and low power mode, the code can be made very efficent. To show the change in power between using PWM, low power, and regular operation, three tests were run using EnergyTrace to determine how much power the boards were using. 
